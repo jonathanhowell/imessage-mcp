@@ -19,9 +19,85 @@ export const convertAppleTimestamp = (appleTimestamp: number): number => {
   return appleTimestamp / 1000000000 + 978307200;
 };
 
+const NSSTRING = new TextEncoder().encode("NSString");
+const utf8 = new TextDecoder("utf-8", { fatal: false });
+
+const indexOf = (haystack: Uint8Array, needle: Uint8Array): number => {
+  const last = haystack.length - needle.length;
+  outer: for (let i = 0; i <= last; i++) {
+    for (let j = 0; j < needle.length; j++) {
+      if (haystack[i + j] !== needle[j]) continue outer;
+    }
+    return i;
+  }
+  return -1;
+};
+
 /**
- * Decodes NSAttributedString data from the attributedBody field.
- * Uses pattern matching approach to extract plain text from binary NSAttributedString format.
+ * Reads the NSString out of an archived (typedstream) NSAttributedString.
+ *
+ * After the `NSString` class name come a few class-version bytes, then `+`
+ * (0x2B), then the byte length as a typedstream integer, then the UTF-8
+ * bytes. The length is a single byte below 0x80, or 0x81 followed by a
+ * 16-bit little-endian value, or 0x82 followed by a 32-bit one. (Slicing at
+ * fixed offsets instead is what left a stray length byte or U+FFFD at the
+ * start of some bodies.)
+ * @returns The string, or `null` if the blob does not have this layout
+ */
+const readTypedStreamString = (blob: Uint8Array): string | null => {
+  const classAt = indexOf(blob, NSSTRING);
+  if (classAt < 0) return null;
+  const searchFrom = classAt + NSSTRING.length;
+  let i = blob.indexOf(0x2b, searchFrom);
+  if (i < 0 || i - searchFrom > 8) return null;
+  i++;
+
+  const tag = blob[i];
+  let length: number;
+  if (tag === undefined) return null;
+  if (tag < 0x80) {
+    length = tag;
+    i += 1;
+  } else if (tag === 0x81 && i + 3 <= blob.length) {
+    length = blob[i + 1]! | (blob[i + 2]! << 8);
+    i += 3;
+  } else if (tag === 0x82 && i + 5 <= blob.length) {
+    length = (blob[i + 1]! | (blob[i + 2]! << 8) | (blob[i + 3]! << 16) |
+      (blob[i + 4]! << 24)) >>> 0;
+    i += 5;
+  } else {
+    return null;
+  }
+  if (i + length > blob.length) return null;
+  return utf8.decode(blob.subarray(i, i + length));
+};
+
+/** Previous heuristic, kept as a fallback for blobs with another layout. */
+const decodeAttributedBodyHeuristically = (blob: Uint8Array): string => {
+  let attributedBody = utf8.decode(blob);
+  if (attributedBody.includes("NSNumber")) {
+    attributedBody = attributedBody.split("NSNumber")[0]!;
+  }
+  if (attributedBody.includes("NSString")) {
+    attributedBody = attributedBody.split("NSString")[1]!;
+  }
+  if (attributedBody.includes("NSDictionary")) {
+    attributedBody = attributedBody.split("NSDictionary")[0]!;
+  }
+  if (attributedBody.length > 18) {
+    attributedBody = attributedBody.slice(6, -12);
+  }
+  return attributedBody
+    // deno-lint-ignore no-control-regex
+    .replace(/[\x00-\x1F\x7F-\x9F]/g, "")
+    .replace(/\s+/g, " ")
+    .trim();
+};
+
+/**
+ * Decodes the message text from the `attributedBody` column (an archived
+ * NSAttributedString). The result is the exact string, as the `text` column
+ * would hold it, including line breaks.
  * @param attributedBodyBlob - Binary data containing NSAttributedString
  * @returns Extracted plain text string
  */
@@ -31,34 +107,8 @@ export const decodeAttributedBody = (
   if (!attributedBodyBlob) return "";
 
   try {
-    // Decode binary data to UTF-8 string
-    const decoder = new TextDecoder("utf-8", { fatal: false });
-    let attributedBody = decoder.decode(attributedBodyBlob);
-
-    // Apply pattern matching similar to Python implementation
-    if (attributedBody.includes("NSNumber")) {
-      attributedBody = attributedBody.split("NSNumber")[0];
-    }
-    if (attributedBody.includes("NSString")) {
-      attributedBody = attributedBody.split("NSString")[1];
-    }
-    if (attributedBody.includes("NSDictionary")) {
-      attributedBody = attributedBody.split("NSDictionary")[0];
-    }
-
-    // Trim wrapper characters (first 6, last 12)
-    if (attributedBody.length > 18) {
-      attributedBody = attributedBody.slice(6, -12);
-    }
-
-    // Clean up whitespace and non-printable characters
-    return (
-      attributedBody
-        // deno-lint-ignore no-control-regex
-        .replace(/[\x00-\x1F\x7F-\x9F]/g, "") // Remove control characters
-        .replace(/\s+/g, " ") // Normalize whitespace
-        .trim()
-    );
+    return readTypedStreamString(attributedBodyBlob) ??
+      decodeAttributedBodyHeuristically(attributedBodyBlob);
   } catch (error) {
     console.warn("Failed to decode attributedBody:", error);
     return "";

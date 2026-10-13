@@ -138,6 +138,16 @@ database. If it cannot be read they return a structured
    - Snapshot mode: builds a fresh snapshot, keeping the previous one if that fails
    - Returns `{status: "ok", mode, source_path, path, opened_at, snapshot?}`, or `{status: "db_unavailable" | "snapshot_failed", message, still_serving}`
 
+### Message text
+
+`text` in message results is the `text` column when it is non-empty. Otherwise
+it is the body decoded from `attributedBody` (an archived NSAttributedString),
+which recent macOS uses for many messages, especially SMS/RCS. The decoder reads
+the typedstream string length rather than slicing at fixed offsets. It returns
+the exact string, including line breaks, as the `text` column would hold it.
+(Earlier versions collapsed whitespace and could leave a stray leading
+character such as `2`, `>` or U+FFFD.)
+
 ### Pagination Examples
 
 All tools now support pagination using `limit` and `offset` parameters and return pagination metadata:
