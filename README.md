@@ -97,7 +97,9 @@ database. If it cannot be read they return a structured
 `{"status": ..., "message": ...}` error (see below) instead of data.
 
 1. **search_messages** - Search messages with filters
-   - `query` (optional): Text to search for
+   - `query` (optional): Text to search for (case-insensitive substring). It
+     matches the same body returned in `text`, including messages whose body is
+     stored only in `attributedBody` (common on recent macOS, especially SMS/RCS)
    - `handle` (optional): Phone number or email to filter by
    - `startDate` (optional): ISO datetime string for start date
    - `endDate` (optional): ISO datetime string for end date

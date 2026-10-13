@@ -66,6 +66,40 @@ export const decodeAttributedBody = (
 };
 
 /**
+ * The body shown for a message: the `text` column when it is non-empty,
+ * otherwise the text decoded from `attributedBody`. Modern macOS often leaves
+ * `text` NULL and stores the body only in `attributedBody`.
+ */
+const messageBody = (
+  text: string | undefined,
+  attributedBody: Uint8Array | null | undefined,
+): string | undefined =>
+  !text && attributedBody ? decodeAttributedBody(attributedBody) : text;
+
+/** Databases on which {@link MESSAGE_BODY_SQL}'s function is registered. */
+const bodyFunctionRegistered = new WeakSet<Database>();
+
+/**
+ * SQL for a message's body, matching {@link messageBody}. `CASE` evaluates
+ * lazily, so only rows without `text` call into the decoder.
+ */
+const MESSAGE_BODY_SQL = `CASE
+  WHEN m.text IS NOT NULL AND m.text != '' THEN m.text
+  WHEN length(m.attributedBody) > 0 THEN imessage_decode_body(m.attributedBody)
+  ELSE m.text
+END`;
+
+const registerBodyFunction = (db: Database): void => {
+  if (bodyFunctionRegistered.has(db)) return;
+  db.function(
+    "imessage_decode_body",
+    (blob: Uint8Array | null) => blob ? decodeAttributedBody(blob) : null,
+    { deterministic: true },
+  );
+  bodyFunctionRegistered.add(db);
+};
+
+/**
  * Returns the path of the Messages database that will be opened: the
  * `IMESSAGE_DB_PATH` environment variable when it is set and non-empty (a
  * leading `~/` is expanded), otherwise `~/Library/Messages/chat.db`.
@@ -134,7 +168,9 @@ export const searchMessages = (
   const params: (string | number)[] = [];
 
   if (query) {
-    whereClause += " AND m.text LIKE ?";
+    // Match the same body that is returned, not just the raw `text` column.
+    registerBodyFunction(messagesDatabase);
+    whereClause += ` AND (${MESSAGE_BODY_SQL}) LIKE ?`;
     params.push(`%${query}%`);
   }
 
@@ -197,17 +233,10 @@ export const searchMessages = (
   }
   const rawData = dataStmt.all(...params, limit, offset) as RawMessageRow[];
 
-  // Process the data to handle attributedBody decoding
-  const data = rawData.map((row) => {
-    const { attributedBody, ...message } = row;
-
-    // If text is null/empty but attributedBody exists, decode it
-    if (!message.text && attributedBody) {
-      message.text = decodeAttributedBody(attributedBody);
-    }
-
-    return message;
-  });
+  const data = rawData.map(({ attributedBody, ...message }) => ({
+    ...message,
+    text: messageBody(message.text, attributedBody),
+  }));
 
   return {
     data,
@@ -373,17 +402,10 @@ export const getMessagesFromChat = (
   }
   const rawData = dataStmt.all(chatGuid, limit, offset) as RawMessageRow[];
 
-  // Process the data to handle attributedBody decoding
-  const data = rawData.map((row) => {
-    const { attributedBody, ...message } = row;
-
-    // If text is null/empty but attributedBody exists, decode it
-    if (!message.text && attributedBody) {
-      message.text = decodeAttributedBody(attributedBody);
-    }
-
-    return message;
-  });
+  const data = rawData.map(({ attributedBody, ...message }) => ({
+    ...message,
+    text: messageBody(message.text, attributedBody),
+  }));
 
   return {
     data,

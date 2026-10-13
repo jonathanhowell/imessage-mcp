@@ -25,7 +25,9 @@ const SearchMessagesSchema = z.object({
   query: z
     .string()
     .optional()
-    .describe("Full-text search query to find in message content"),
+    .describe(
+      "Text to find in message content (case-insensitive substring). Matches the same body that is returned in 'text', including messages whose body is stored only in attributedBody.",
+    ),
   handle: z
     .string()
     .optional()
