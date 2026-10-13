@@ -57,10 +57,10 @@ Add to your Claude Desktop configuration (`~/Library/Application Support/Claude/
 ### Programmatic Usage
 
 ```typescript
-import { startServer } from "@wyattjoh/imessage-mcp";
+import { main } from "@wyattjoh/imessage-mcp";
 
-// Start the MCP server
-await startServer();
+// Start the MCP server on stdio
+await main();
 ```
 
 ## Permissions
@@ -71,6 +71,12 @@ The server requires the following Deno permissions:
 - `--allow-env`: Environment variable access
 - `--allow-sys`: System information access
 - `--allow-ffi`: SQLite native bindings
+
+## Configuration
+
+- `IMESSAGE_DB_PATH`: Messages database to read (default
+  `~/Library/Messages/chat.db`). Point it at a snapshot so that a process
+  without Full Disk Access can read messages.
 
 ## Requirements
 

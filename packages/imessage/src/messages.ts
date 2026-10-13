@@ -66,10 +66,18 @@ export const decodeAttributedBody = (
 };
 
 /**
- * Returns the path of the Messages database that will be opened.
- * @returns Absolute path of `chat.db`
+ * Returns the path of the Messages database that will be opened: the
+ * `IMESSAGE_DB_PATH` environment variable when it is set and non-empty (a
+ * leading `~/` is expanded), otherwise `~/Library/Messages/chat.db`.
+ * @returns Path of the database file
  */
 export const getImessageDbPath = (): string => {
+  const override = Deno.env.get("IMESSAGE_DB_PATH")?.trim();
+  if (override) {
+    return override === "~" || override.startsWith("~/")
+      ? join(homedir(), override.slice(1))
+      : override;
+  }
   return join(homedir(), "Library", "Messages", "chat.db");
 };
 

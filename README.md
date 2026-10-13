@@ -186,6 +186,15 @@ This metadata helps you:
 - Calculate which page you're on and how many pages exist
 - Build proper pagination UI components
 
+### Configuration
+
+| Environment variable | Default                      | Purpose                                                                                                    |
+| -------------------- | ---------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `IMESSAGE_DB_PATH`   | `~/Library/Messages/chat.db` | Messages database to read. Point it at a snapshot so a process without Full Disk Access can read messages. |
+
+Set and non-empty values win (a leading `~/` is expanded). The resolved path is
+logged at startup and included in `db_unavailable` errors.
+
 ### When a database cannot be opened
 
 The server always completes the MCP handshake, even if it cannot read the
@@ -208,7 +217,8 @@ The usual cause is Full Disk Access (FDA). macOS grants FDA to the app that
 launched the process (for example, your terminal), so a server started from a
 LaunchAgent or another headless context does not inherit it. Grant FDA to the
 `deno` binary named in the message (System Settings > Privacy & Security > Full
-Disk Access).
+Disk Access), or set `IMESSAGE_DB_PATH` to a snapshot that a process holding
+FDA has written.
 
 The server exits with status 0 when its stdin or the MCP transport closes.
 
