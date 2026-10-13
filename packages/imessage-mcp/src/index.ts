@@ -257,6 +257,16 @@ export const createServer = ({ messages, contacts }: ServerState) => {
   );
 
   server.tool(
+    "refresh_database",
+    "Make subsequent reads see the latest iMessage data. In live mode (default) this closes and reopens the database connection, which also picks up a replaced IMESSAGE_DB_PATH file and retries after db_unavailable. In snapshot mode (IMESSAGE_DB_MODE=snapshot) it builds a fresh snapshot; if that fails the previous snapshot stays in use. Returns {status: 'ok', mode, source_path, path, opened_at, snapshot?}, or {status: 'db_unavailable' | 'snapshot_failed', message, still_serving}.",
+    {},
+    handler("Error refreshing database", async () => ({
+      status: "ok",
+      ...(await messages.refresh()),
+    })),
+  );
+
+  server.tool(
     "search_contacts",
     "Search for contacts by first name and optional last name. Use this FIRST when searching for messages from a specific person - it returns the phone number that can be used as the 'handle' parameter in 'search_messages'. Example: search for firstName='John' lastName='Smith' to get his phone number, then use that phone number in search_messages. If lastName is omitted, searches across all name fields. CRITICAL: Results are paginated - for complete contact search results, check 'hasMore' field and use 'offset' parameter until hasMore=false. If the Contacts databases cannot be read, returns {status: 'contacts_unavailable', message}; message tools keep working.",
     SearchContactsSchema.shape,
@@ -297,14 +307,16 @@ export const main = async (): Promise<void> => {
   // Connect FIRST: the handshake must never depend on database access, so a
   // missing Full Disk Access grant surfaces as a tool error, not a dead server.
   await server.connect(transport);
+  const { mode, path } = state.messages.config;
   console.error(
-    `iMessage MCP Server running on stdio (database: ${state.messages.path})`,
+    `iMessage MCP Server running on stdio (mode: ${mode}, database: ${path})`,
   );
 
-  state.messages.acquire().then(
-    () => console.error("Messages database opened."),
-    (error) => console.error(`Messages database unavailable: ${error.message}`),
-  );
+  // Open (or snapshot) in the background; tools wait for it or report status.
+  state.messages.start().then(() => {
+    const info = state.messages.info();
+    if (info) console.error(`Reading ${info.path}`);
+  });
 };
 
 export const run = (): void => {

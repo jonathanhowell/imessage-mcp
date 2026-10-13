@@ -10,13 +10,14 @@ deno add @wyattjoh/imessage-mcp
 
 ## Features
 
-- **6 MCP Tools** for comprehensive iMessage access:
+- **7 MCP Tools** for comprehensive iMessage access:
   - `search_messages` - Full-text search with filters
   - `get_recent_messages` - Latest messages across all chats
   - `get_chats` - List conversations by activity
   - `get_handles` - All contacts/phone numbers
   - `get_messages_from_chat` - Messages from specific conversations
   - `search_contacts` - Search macOS Contacts by name
+  - `refresh_database` - Reopen the database, or rebuild the snapshot in snapshot mode
 
 - **Pagination Support** - All tools support limit/offset pagination
 - **Type-Safe** - Full TypeScript support with Zod schemas
@@ -29,7 +30,7 @@ deno add @wyattjoh/imessage-mcp
 The package can be run directly as an MCP server:
 
 ```bash
-deno run --allow-read --allow-env --allow-sys --allow-ffi jsr:@wyattjoh/imessage-mcp
+deno run --allow-read --allow-env --allow-sys --allow-ffi --allow-write --allow-run jsr:@wyattjoh/imessage-mcp
 ```
 
 ### In Claude Desktop
@@ -47,6 +48,8 @@ Add to your Claude Desktop configuration (`~/Library/Application Support/Claude/
         "--allow-env",
         "--allow-sys",
         "--allow-ffi",
+        "--allow-write",
+        "--allow-run",
         "jsr:@wyattjoh/imessage-mcp"
       ]
     }
@@ -71,12 +74,21 @@ The server requires the following Deno permissions:
 - `--allow-env`: Environment variable access
 - `--allow-sys`: System information access
 - `--allow-ffi`: SQLite native bindings
+- `--allow-write`: Snapshot mode (writes under `IMESSAGE_SNAPSHOT_DIR`)
+- `--allow-run`: Snapshot mode (detecting dead instances' snapshot files; `getconf` when `TMPDIR` is unset)
 
 ## Configuration
 
 - `IMESSAGE_DB_PATH`: Messages database to read (default
   `~/Library/Messages/chat.db`). Point it at a snapshot so that a process
   without Full Disk Access can read messages.
+- `IMESSAGE_DB_MODE`: `live` (default) or `snapshot`.
+- `IMESSAGE_SNAPSHOT_DIR`: Snapshot directory (default `$TMPDIR/imessage-mcp`,
+  which also holds the `latest.sqlite` link).
+- `IMESSAGE_SNAPSHOT_TIMEOUT_SECONDS`: Snapshot deadline (default 120).
+
+See the [repository README](../../README.md#live-and-snapshot-modes) for
+details.
 
 ## Requirements
 

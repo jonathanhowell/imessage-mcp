@@ -32,15 +32,14 @@ deno publish
 ```bash
 # Run the MCP server
 cd packages/imessage-mcp
-deno run --allow-read --allow-env --allow-sys --allow-ffi mod.ts
+deno run --allow-read --allow-env --allow-sys --allow-ffi --allow-write --allow-run mod.ts
 
 # Development with file watching
 cd packages/imessage-mcp
-deno run --allow-read --allow-env --allow-sys --allow-ffi --watch mod.ts
+deno run --allow-read --allow-env --allow-sys --allow-ffi --allow-write --allow-run --watch mod.ts
 
-# Test the core library
-cd packages/imessage
-deno test --allow-read --allow-env --allow-ffi
+# Tests use fixture databases in temp dirs and run mod.ts over stdio
+deno task test
 ```
 
 ## Architecture Overview
@@ -63,9 +62,13 @@ This monorepo contains a Model Context Protocol (MCP) server and core library th
 
 1. **MCP Server Layer** (`packages/imessage-mcp/src/index.ts`)
    - Creates MCP server instance using `@modelcontextprotocol/sdk`
-   - Defines 6 tools with Zod schemas for validation
-   - Uses StdioServerTransport for communication
-   - Lazy database initialization pattern
+   - Defines the tools with Zod schemas for validation
+   - Uses StdioServerTransport for communication; connects BEFORE touching any database
+   - `src/state.ts`: lazily opened Messages/Contacts handles; open failures become structured
+     `{status, message, path}` tool errors (`db_unavailable`, `contacts_unavailable`,
+     `snapshot_pending`, `snapshot_failed`), never a crash
+   - `src/snapshot.ts` + `src/snapshot_worker.ts`: snapshot mode (`IMESSAGE_DB_MODE=snapshot`),
+     single-step online backup in a worker, `latest.sqlite` link, dead-owner cleanup
 
 2. **Messages Database Layer** (`packages/imessage/src/messages.ts`)
    - Pure functions for all database operations
@@ -104,6 +107,7 @@ This monorepo contains a Model Context Protocol (MCP) server and core library th
 4. `get_handles` - All contacts/phone numbers
 5. `get_messages_from_chat` - Messages from specific chat GUID
 6. `search_contacts` - Search macOS Contacts by name, returns phone/email handles
+7. `refresh_database` - Reopen the connection (live) or rebuild the snapshot (snapshot mode)
 
 ### Important Pagination Note
 

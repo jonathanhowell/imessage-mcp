@@ -11,6 +11,7 @@ A Deno monorepo containing packages for iMessage access on macOS:
 - Get recent messages
 - List all chats/conversations
 - Get all contacts/handles
+- Optional snapshot mode, and a `refresh_database` tool
 - Retrieve messages from specific chats
 - Search macOS Contacts by name with iMessage handle ID correlation
 
@@ -47,10 +48,10 @@ MCP server for LLM integration:
 
 ```bash
 # Run directly from JSR
-deno run --allow-read --allow-env --allow-sys --allow-ffi jsr:@wyattjoh/imessage-mcp
+deno run --allow-read --allow-env --allow-sys --allow-ffi --allow-write --allow-run jsr:@wyattjoh/imessage-mcp
 
 # Or install globally
-deno install --global --allow-read --allow-env --allow-sys --allow-ffi -n imessage-mcp jsr:@wyattjoh/imessage-mcp
+deno install --global --allow-read --allow-env --allow-sys --allow-ffi --allow-write --allow-run -n imessage-mcp jsr:@wyattjoh/imessage-mcp
 ```
 
 For Claude Desktop app integration, add this to your `claude_desktop_config.json`:
@@ -66,6 +67,8 @@ For Claude Desktop app integration, add this to your `claude_desktop_config.json
         "--allow-env",
         "--allow-sys",
         "--allow-ffi",
+        "--allow-write",
+        "--allow-run",
         "jsr:@wyattjoh/imessage-mcp"
       ]
     }
@@ -89,6 +92,10 @@ For Claude Desktop app integration, add this to your `claude_desktop_config.json
 
 ### Available Tools
 
+All tools except `search_contacts` and `refresh_database` read the Messages
+database. If it cannot be read they return a structured
+`{"status": ..., "message": ...}` error (see below) instead of data.
+
 1. **search_messages** - Search messages with filters
    - `query` (optional): Text to search for
    - `handle` (optional): Phone number or email to filter by
@@ -106,8 +113,10 @@ For Claude Desktop app integration, add this to your `claude_desktop_config.json
    - `offset` (optional): Pagination offset (default: 0)
 
 4. **get_handles** - Get all contacts/handles
-   - `limit` (optional): Number of handles (1-200, default: 100)
-   - `offset` (optional): Pagination offset (default: 0)
+
+- Optional snapshot mode, and a `refresh_database` tool
+  - `limit` (optional): Number of handles (1-200, default: 100)
+  - `offset` (optional): Pagination offset (default: 0)
 
 5. **get_messages_from_chat** - Get messages from a specific chat
    - `chatGuid` (required): The chat GUID
@@ -121,6 +130,11 @@ For Claude Desktop app integration, add this to your `claude_desktop_config.json
    - `offset` (optional): Pagination offset (default: 0)
    - Returns contact info with phone numbers and email addresses that can be used as handle parameters
    - Searches directly in the macOS AddressBook database for better performance and reliability
+
+7. **refresh_database** - Make later reads see the latest messages (no parameters)
+   - Live mode: closes and reopens the connection
+   - Snapshot mode: builds a fresh snapshot, keeping the previous one if that fails
+   - Returns `{status: "ok", mode, source_path, path, opened_at, snapshot?}`, or `{status: "db_unavailable" | "snapshot_failed", message, still_serving}`
 
 ### Pagination Examples
 
@@ -188,12 +202,71 @@ This metadata helps you:
 
 ### Configuration
 
-| Environment variable | Default                      | Purpose                                                                                                    |
-| -------------------- | ---------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| `IMESSAGE_DB_PATH`   | `~/Library/Messages/chat.db` | Messages database to read. Point it at a snapshot so a process without Full Disk Access can read messages. |
+| Environment variable                | Default                      | Purpose                                                                                                    |
+| ----------------------------------- | ---------------------------- | ---------------------------------------------------------------------------------------------------------- |
+| `IMESSAGE_DB_PATH`                  | `~/Library/Messages/chat.db` | Messages database to read. Point it at a snapshot so a process without Full Disk Access can read messages. |
+| `IMESSAGE_DB_MODE`                  | `live`                       | `live` reads the database directly. `snapshot` reads a private copy made at startup (see below).           |
+| `IMESSAGE_SNAPSHOT_DIR`             | `$TMPDIR/imessage-mcp`       | Where snapshot mode writes its copies.                                                                     |
+| `IMESSAGE_SNAPSHOT_TIMEOUT_SECONDS` | `120`                        | Deadline for building a snapshot before it is abandoned.                                                   |
 
-Set and non-empty values win (a leading `~/` is expanded). The resolved path is
-logged at startup and included in `db_unavailable` errors.
+Set and non-empty values win (a leading `~/` in `IMESSAGE_DB_PATH` is
+expanded). The resolved path is logged at startup and included in
+`db_unavailable` errors.
+
+### Live and snapshot modes
+
+In **live** mode (the default) the server reads `chat.db` directly. SQLite
+readers see new messages, including ones still in `chat.db-wal`, on every
+query, so live reads are always current. `refresh_database` closes and reopens
+the connection. Use it after replacing the file at `IMESSAGE_DB_PATH`, or to
+retry after `db_unavailable` (for example, once Full Disk Access is granted).
+
+In **snapshot** mode (`IMESSAGE_DB_MODE=snapshot`) the server copies the
+database after the MCP handshake and serves every read from that copy until
+`refresh_database` builds a new one:
+
+- The copy uses SQLite's online backup in a single step, so it includes pages
+  that are still only in `chat.db-wal` (a plain file copy of `chat.db` does not)
+  and cannot be restarted by Messages writing during the copy. `VACUUM INTO`
+  is the fallback. The copy runs in a worker thread, so the server keeps
+  answering while it runs.
+- The copy is written to `snapshot-<pid>.sqlite.tmp` (mode 0600) and renamed to
+  `snapshot-<pid>.sqlite`. Then `latest.sqlite` is atomically repointed at it.
+  Each instance has its own file; only files whose owning process has exited
+  are removed, and never the one `latest.sqlite` points at.
+- While the first copy is being built, tools wait up to 20 seconds and then
+  return `{"status": "snapshot_pending", ...}`. A failed copy returns
+  `{"status": "snapshot_failed", "message": ...}`, and the next tool call or
+  `refresh_database` retries. A failed refresh keeps serving the previous copy
+  (`still_serving` in the response).
+
+`$TMPDIR/imessage-mcp/latest.sqlite` always points at the newest good snapshot
+from any instance. That lets a process without Full Disk Access read messages:
+run one instance in snapshot mode from a context that has FDA (for example,
+your terminal), and point the headless one at the link:
+
+```bash
+IMESSAGE_DB_PATH="$TMPDIR/imessage-mcp/latest.sqlite"  # live mode (default)
+```
+
+The headless instance then calls `refresh_database` to pick up a newer
+snapshot. Offline tools can read it with
+`sqlite3 "file:$TMPDIR/imessage-mcp/latest.sqlite?immutable=1"`.
+
+A LaunchAgent may not have `TMPDIR` set. In that case the server asks macOS
+for the per-user temp directory (`getconf DARWIN_USER_TEMP_DIR`), which is the
+same directory an interactive shell uses. For a headless consumer, prefer an
+absolute `IMESSAGE_DB_PATH`.
+
+### Permissions
+
+| Flag                         | Needed for                                                                                                                                                                 |
+| ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--allow-read`               | The Messages and Contacts databases                                                                                                                                        |
+| `--allow-env`, `--allow-sys` | Configuration and the home directory                                                                                                                                       |
+| `--allow-ffi`                | SQLite native bindings                                                                                                                                                     |
+| `--allow-write`              | Snapshot mode (writes under `IMESSAGE_SNAPSHOT_DIR`)                                                                                                                       |
+| `--allow-run`                | Snapshot mode: checking whether other instances are still running, so their files are not removed (without it nothing is cleaned up), and `getconf` when `TMPDIR` is unset |
 
 ### When a database cannot be opened
 
@@ -254,7 +327,7 @@ deno task test
 
 # Run MCP server locally
 cd packages/imessage-mcp
-deno run --allow-read --allow-env --allow-sys --allow-ffi mod.ts
+deno run --allow-read --allow-env --allow-sys --allow-ffi --allow-write --allow-run mod.ts
 
 # Publish packages (CI/CD)
 deno publish
@@ -265,7 +338,7 @@ deno publish
 ```bash
 # Work on @wyattjoh/imessage
 cd packages/imessage
-deno test --allow-read --allow-env --allow-ffi
+deno task test  # from the repository root: fixture-based tests
 
 # Work on @wyattjoh/imessage-mcp
 cd packages/imessage-mcp
