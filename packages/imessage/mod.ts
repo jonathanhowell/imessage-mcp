@@ -4,13 +4,19 @@ export {
   decodeAttributedBody,
   getChats,
   getHandles,
+  getImessageDbPath,
   getMessagesFromChat,
   getRecentMessages,
   openMessagesDatabase,
   searchMessages,
 } from "./src/messages.ts";
 
-export { openContactsDatabases, searchContactsByName } from "./src/contacts.ts";
+export {
+  findContactsDatabasePaths,
+  getContactsSourcesPath,
+  openContactsDatabases,
+  searchContactsByName,
+} from "./src/contacts.ts";
 
 export type {
   Chat,

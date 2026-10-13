@@ -186,6 +186,32 @@ This metadata helps you:
 - Calculate which page you're on and how many pages exist
 - Build proper pagination UI components
 
+### When a database cannot be opened
+
+The server always completes the MCP handshake, even if it cannot read the
+Messages or Contacts databases. Each database is opened on first use, and
+failures come back as a structured tool error (`isError: true`) instead of the
+process exiting:
+
+```json
+{
+  "status": "db_unavailable",
+  "message": "cannot open /Users/you/Library/Messages/chat.db (SqliteError 14: unable to open database file). This is usually a missing Full Disk Access grant for the process that launched the server ...",
+  "path": "/Users/you/Library/Messages/chat.db"
+}
+```
+
+`search_contacts` reports `contacts_unavailable` in the same way, and the
+message tools keep working.
+
+The usual cause is Full Disk Access (FDA). macOS grants FDA to the app that
+launched the process (for example, your terminal), so a server started from a
+LaunchAgent or another headless context does not inherit it. Grant FDA to the
+`deno` binary named in the message (System Settings > Privacy & Security > Full
+Disk Access).
+
+The server exits with status 0 when its stdin or the MCP transport closes.
+
 ## Security Notes
 
 - This server runs with read-only access to the iMessage database

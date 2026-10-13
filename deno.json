@@ -1,10 +1,13 @@
 {
   "workspace": ["packages/imessage", "packages/imessage-mcp"],
+  "imports": {
+    "@std/assert": "jsr:@std/assert@^1.0.0"
+  },
   "tasks": {
     "check": "deno check",
     "fmt": "deno fmt",
     "lint": "deno lint",
-    "test": "deno test --allow-net"
+    "test": "deno test --allow-read --allow-write --allow-env --allow-sys --allow-ffi --allow-run --allow-net"
   },
   "compilerOptions": {
     "strict": true,

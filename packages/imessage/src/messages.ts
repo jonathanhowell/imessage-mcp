@@ -65,16 +65,22 @@ export const decodeAttributedBody = (
   }
 };
 
-const getImessageDbPath = (): string => {
+/**
+ * Returns the path of the Messages database that will be opened.
+ * @returns Absolute path of `chat.db`
+ */
+export const getImessageDbPath = (): string => {
   return join(homedir(), "Library", "Messages", "chat.db");
 };
 
 /**
  * Opens a read-only connection to the macOS Messages database.
+ * @param dbPath - Database file to open (default: {@link getImessageDbPath})
  * @returns Database instance for executing queries
  */
-export const openMessagesDatabase = (): Database => {
-  const dbPath = getImessageDbPath();
+export const openMessagesDatabase = (
+  dbPath: string = getImessageDbPath(),
+): Database => {
   return new Database(dbPath, { readonly: true });
 };
 

@@ -16,50 +16,48 @@ interface ContactHandleRow {
 }
 
 /**
+ * Returns the directory holding one AddressBook database per contacts source.
+ * @returns Absolute path of the AddressBook `Sources` directory
+ */
+export const getContactsSourcesPath = (): string =>
+  join(homedir(), "Library", "Application Support", "AddressBook", "Sources");
+
+/**
+ * Lists the AddressBook database files present on the system.
+ * Unlike {@link openContactsDatabases}, errors (such as a missing Full Disk
+ * Access grant) are thrown rather than reported as "no databases".
+ * @returns Absolute paths of each `AddressBook-v22.abcddb` file
+ */
+export function findContactsDatabasePaths(): string[] {
+  const addressBookBasePath = getContactsSourcesPath();
+  const paths: string[] = [];
+  for (const entry of Deno.readDirSync(addressBookBasePath)) {
+    if (!entry.isDirectory) continue;
+    const dbPath = join(
+      addressBookBasePath,
+      entry.name,
+      "AddressBook-v22.abcddb",
+    );
+    try {
+      if (Deno.statSync(dbPath).isFile) paths.push(dbPath);
+    } catch {
+      // Database file doesn't exist
+    }
+  }
+  return paths;
+}
+
+/**
  * Opens all available AddressBook databases on the system.
  * Searches for AddressBook database files in the macOS AddressBook Sources directory.
  * @returns Array of Database instances for each available AddressBook
  */
 export function openContactsDatabases(): Database[] {
   const databases: Database[] = [];
-  const addressBookBasePath = join(
-    homedir(),
-    "Library",
-    "Application Support",
-    "AddressBook",
-    "Sources",
-  );
-
   try {
-    // Find all AddressBook database files
-    const sourcesDirs = [];
-    for (const entry of Deno.readDirSync(addressBookBasePath)) {
-      if (entry.isDirectory) {
-        sourcesDirs.push(entry.name);
-      }
+    for (const dbPath of findContactsDatabasePaths()) {
+      databases.push(new Database(dbPath, { readonly: true }));
     }
-
-    // Open each AddressBook database
-    for (const sourceDir of sourcesDirs) {
-      const dbPath = join(
-        addressBookBasePath,
-        sourceDir,
-        "AddressBook-v22.abcddb",
-      );
-
-      try {
-        if (!Deno.statSync(dbPath).isFile) {
-          continue;
-        }
-      } catch {
-        // Database file doesn't exist
-        continue;
-      }
-
-      const db = new Database(dbPath, { readonly: true });
-      databases.push(db);
-    }
-
     return databases;
   } catch (error) {
     console.error("Error opening AddressBook databases:", error);
