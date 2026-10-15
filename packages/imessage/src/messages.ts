@@ -173,13 +173,25 @@ const toMessages = (
 };
 
 /**
+ * Reads an environment variable only if Deno already allows it, so a
+ * narrower `--allow-env=...` grant neither prompts nor throws.
+ * @returns The value, or `undefined` if unset or not permitted
+ */
+export const readEnv = (name: string): string | undefined =>
+  Deno.permissions.querySync({ name: "env", variable: name }).state ===
+      "granted"
+    ? Deno.env.get(name)
+    : undefined;
+
+/**
  * Returns the path of the Messages database that will be opened: the
- * `IMESSAGE_DB_PATH` environment variable when it is set and non-empty (a
- * leading `~/` is expanded), otherwise `~/Library/Messages/chat.db`.
+ * `IMESSAGE_DB_PATH` environment variable when it is set, non-empty and
+ * readable under the granted permissions (a leading `~/` is expanded),
+ * otherwise `~/Library/Messages/chat.db`.
  * @returns Path of the database file
  */
 export const getImessageDbPath = (): string => {
-  const override = Deno.env.get("IMESSAGE_DB_PATH")?.trim();
+  const override = readEnv("IMESSAGE_DB_PATH")?.trim();
   if (override) {
     return override === "~" || override.startsWith("~/")
       ? join(homedir(), override.slice(1))

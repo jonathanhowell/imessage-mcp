@@ -20,7 +20,7 @@ A Deno monorepo containing packages for iMessage access on macOS:
 
 - macOS (iMessage is only available on macOS)
 - Deno 2.x or later
-- Read access to `~/Library/Messages/chat.db`
+- Read access to `~/Library/Messages/chat.db`, or to a custom database configured with `IMESSAGE_DB_PATH`
 - Read access to `~/Library/Application Support/AddressBook/` (for contacts search)
 
 ## Packages
@@ -76,6 +76,33 @@ For Claude Desktop app integration, add this to your `claude_desktop_config.json
   }
 }
 ```
+
+#### Custom Messages Database
+
+Set `IMESSAGE_DB_PATH` to open a read-only SQLite database at another location, such as a periodically refreshed snapshot of `chat.db`:
+
+```json
+{
+  "mcpServers": {
+    "imessage": {
+      "command": "deno",
+      "args": [
+        "run",
+        "--allow-read",
+        "--allow-env=IMESSAGE_DB_PATH,DENO_SQLITE_PATH,DENO_SQLITE_LOCAL,HOME,DENO_DIR,XDG_CACHE_HOME",
+        "--allow-sys",
+        "--allow-ffi",
+        "jsr:@wyattjoh/imessage-mcp"
+      ],
+      "env": {
+        "IMESSAGE_DB_PATH": "/tmp/imessage-snapshot.sqlite"
+      }
+    }
+  }
+}
+```
+
+The process needs read access to the custom file. If Deno does not have permission to read `IMESSAGE_DB_PATH`, or the variable is empty or unset, the library uses `~/Library/Messages/chat.db` without prompting for environment access. The same applies to the other `IMESSAGE_*` variables: any that are not granted fall back to their defaults. The SQLite and cache variables in the list are read by `@db/sqlite` to locate its native library; without them the server cannot start. This narrow grant gives live mode only. Snapshot mode and `get_attachment` also need `--allow-write`, `--allow-run` and the variables they use (`IMESSAGE_DB_MODE`, `IMESSAGE_SNAPSHOT_DIR`, `IMESSAGE_SNAPSHOT_TIMEOUT_SECONDS`, `TMPDIR`), or simply `--allow-env`.
 
 ### Option 2: From Source
 

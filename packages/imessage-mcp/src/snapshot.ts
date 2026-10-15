@@ -1,4 +1,5 @@
 import process from "node:process";
+import { readEnv } from "@wyattjoh/imessage";
 import { basename, join, resolve } from "node:path";
 import type {
   SnapshotWorkerInput,
@@ -16,7 +17,7 @@ const SNAPSHOT_RE = /^snapshot-(\d+)\.sqlite(\.tmp)?(-wal|-shm|-journal)?$/;
  * silently diverging to /tmp.
  */
 export const userTempDir = (): string => {
-  const env = Deno.env.get("TMPDIR");
+  const env = readEnv("TMPDIR");
   if (env) return env;
   try {
     const out = new Deno.Command("/usr/bin/getconf", {
@@ -33,7 +34,7 @@ export const userTempDir = (): string => {
 
 /** `$IMESSAGE_SNAPSHOT_DIR`, else `$TMPDIR/imessage-mcp`. */
 export const defaultSnapshotDir = (): string =>
-  Deno.env.get("IMESSAGE_SNAPSHOT_DIR")?.trim() ||
+  readEnv("IMESSAGE_SNAPSHOT_DIR")?.trim() ||
   join(userTempDir(), "imessage-mcp");
 
 export const snapshotPathFor = (dir: string, pid: number): string =>

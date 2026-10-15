@@ -5,6 +5,7 @@ import {
   getContactsSourcesPath,
   getImessageDbPath,
   openMessagesDatabase,
+  readEnv,
 } from "@wyattjoh/imessage";
 import { errorText } from "./errors.ts";
 import {
@@ -88,7 +89,7 @@ const positive = (value: string | undefined): number | undefined => {
 
 /** Reads IMESSAGE_DB_MODE, IMESSAGE_DB_PATH and the snapshot settings. */
 export const loadMessagesConfig = (): MessagesConfig => {
-  const mode = Deno.env.get("IMESSAGE_DB_MODE")?.trim().toLowerCase();
+  const mode = readEnv("IMESSAGE_DB_MODE")?.trim().toLowerCase();
   if (mode && mode !== "live" && mode !== "snapshot") {
     console.error(`Ignoring IMESSAGE_DB_MODE=${mode}; expected live|snapshot`);
   }
@@ -97,7 +98,7 @@ export const loadMessagesConfig = (): MessagesConfig => {
     path: getImessageDbPath(),
     snapshotDir: defaultSnapshotDir(),
     snapshotTimeoutMs: (positive(
-      Deno.env.get("IMESSAGE_SNAPSHOT_TIMEOUT_SECONDS"),
+      readEnv("IMESSAGE_SNAPSHOT_TIMEOUT_SECONDS"),
     ) ?? DEFAULT_SNAPSHOT_TIMEOUT_SECONDS) * 1000,
     acquireWaitMs: 20_000,
   };

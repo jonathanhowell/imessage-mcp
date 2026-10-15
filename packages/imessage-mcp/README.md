@@ -58,6 +58,31 @@ Add to your Claude Desktop configuration (`~/Library/Application Support/Claude/
 }
 ```
 
+To read a database snapshot or another SQLite file, grant access to `IMESSAGE_DB_PATH` and set it in the server environment:
+
+```json
+{
+  "mcpServers": {
+    "imessage": {
+      "command": "deno",
+      "args": [
+        "run",
+        "--allow-read",
+        "--allow-env=IMESSAGE_DB_PATH",
+        "--allow-sys",
+        "--allow-ffi",
+        "jsr:@wyattjoh/imessage-mcp"
+      ],
+      "env": {
+        "IMESSAGE_DB_PATH": "/tmp/imessage-snapshot.sqlite"
+      }
+    }
+  }
+}
+```
+
+If access to the variable is not permitted, or it is empty or unset, the server uses `~/Library/Messages/chat.db` without prompting for environment access.
+
 ### Programmatic Usage
 
 ```typescript
@@ -72,7 +97,7 @@ await main();
 The server requires the following Deno permissions:
 
 - `--allow-read`: Access to iMessage and Contacts databases
-- `--allow-env`: Environment variable access
+- `--allow-env=IMESSAGE_DB_PATH`: Custom Messages database path (optional)
 - `--allow-sys`: System information access
 - `--allow-ffi`: SQLite native bindings
 - `--allow-write`: Snapshot mode (writes under `IMESSAGE_SNAPSHOT_DIR`) and `get_attachment` (copies under `$TMPDIR/imessage-mcp/media`)
@@ -95,7 +120,7 @@ details.
 
 - macOS (uses system iMessage and Contacts databases)
 - Deno 2.x or later
-- Access to `~/Library/Messages/chat.db`
+- Access to `~/Library/Messages/chat.db`, or to the file configured with `IMESSAGE_DB_PATH`
 - Access to `~/Library/Application Support/AddressBook/`
 
 ## License

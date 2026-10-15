@@ -8,6 +8,7 @@ export {
   getMessagesFromChat,
   getRecentMessages,
   openMessagesDatabase,
+  readEnv,
   searchMessages,
 } from "./src/messages.ts";
 
