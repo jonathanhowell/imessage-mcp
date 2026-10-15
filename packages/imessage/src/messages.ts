@@ -6,6 +6,7 @@ import type {
   PaginatedResult,
   SearchOptions,
 } from "./types.ts";
+import { getAttachmentSummaries } from "./attachments.ts";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -150,6 +151,28 @@ const registerBodyFunction = (db: Database): void => {
 };
 
 /**
+ * Finishes raw message rows: decodes bodies and attaches attachment
+ * summaries (looked up only for messages flagged as having attachments).
+ */
+const toMessages = (
+  messagesDatabase: Database,
+  rows: (MessageWithHandle & {
+    message_rowid: number;
+    attributedBody?: Uint8Array | null;
+  })[],
+): MessageWithHandle[] => {
+  const attachments = getAttachmentSummaries(
+    messagesDatabase,
+    rows.filter((r) => r.cache_has_attachments).map((r) => r.message_rowid),
+  );
+  return rows.map(({ attributedBody, message_rowid, ...message }) => ({
+    ...message,
+    text: messageBody(message.text, attributedBody),
+    attachments: attachments.get(message_rowid) ?? [],
+  }));
+};
+
+/**
  * Returns the path of the Messages database that will be opened: the
  * `IMESSAGE_DB_PATH` environment variable when it is set and non-empty (a
  * leading `~/` is expanded), otherwise `~/Library/Messages/chat.db`.
@@ -253,7 +276,8 @@ export const searchMessages = (
 
   // Get paginated data
   const dataSql = `
-    SELECT 
+    SELECT
+      m.ROWID AS message_rowid,
       m.guid,
       m.text,
       m.attributedBody,
@@ -279,14 +303,12 @@ export const searchMessages = (
 
   const dataStmt = messagesDatabase.prepare(dataSql);
   interface RawMessageRow extends MessageWithHandle {
+    message_rowid: number;
     attributedBody?: Uint8Array | null;
   }
   const rawData = dataStmt.all(...params, limit, offset) as RawMessageRow[];
 
-  const data = rawData.map(({ attributedBody, ...message }) => ({
-    ...message,
-    text: messageBody(message.text, attributedBody),
-  }));
+  const data = toMessages(messagesDatabase, rawData);
 
   return {
     data,
@@ -419,7 +441,8 @@ export const getMessagesFromChat = (
 
   // Get paginated data
   const dataSql = `
-    SELECT 
+    SELECT
+      m.ROWID AS message_rowid,
       m.guid,
       m.text,
       m.attributedBody,
@@ -448,14 +471,12 @@ export const getMessagesFromChat = (
 
   const dataStmt = messagesDatabase.prepare(dataSql);
   interface RawMessageRow extends MessageWithHandle {
+    message_rowid: number;
     attributedBody?: Uint8Array | null;
   }
   const rawData = dataStmt.all(chatGuid, limit, offset) as RawMessageRow[];
 
-  const data = rawData.map(({ attributedBody, ...message }) => ({
-    ...message,
-    text: messageBody(message.text, attributedBody),
-  }));
+  const data = toMessages(messagesDatabase, rawData);
 
   return {
     data,

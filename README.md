@@ -12,6 +12,7 @@ A Deno monorepo containing packages for iMessage access on macOS:
 - List all chats/conversations
 - Get all contacts/handles
 - Optional snapshot mode, and a `refresh_database` tool
+- Retrieve message attachments (HEIC photos converted to JPEG)
 - Retrieve messages from specific chats
 - Search macOS Contacts by name with iMessage handle ID correlation
 
@@ -117,6 +118,7 @@ database. If it cannot be read they return a structured
 4. **get_handles** - Get all contacts/handles
 
 - Optional snapshot mode, and a `refresh_database` tool
+- Retrieve message attachments (HEIC photos converted to JPEG)
   - `limit` (optional): Number of handles (1-200, default: 100)
   - `offset` (optional): Pagination offset (default: 0)
 
@@ -133,10 +135,26 @@ database. If it cannot be read they return a structured
    - Returns contact info with phone numbers and email addresses that can be used as handle parameters
    - Searches directly in the macOS AddressBook database for better performance and reliability
 
-7. **refresh_database** - Make later reads see the latest messages (no parameters)
+7. **get_attachment** - Retrieve a file attached to a message
+   - `attachment_id` (one of): From a message's `attachments` list
+   - `message_guid` (one of): Returns the message's first attachment, and lists all of them in `attachments`
+   - `inline` (optional, default false): Return the content in the response (files up to 5 MB). Images come as an MCP image content block; other files as base64 in `data`
+   - By default the file is copied to `$TMPDIR/imessage-mcp/media/` (0600; exports older than 24 h are pruned) and the response is `{status, path, mime_type, byte_size, filename, attachment_id, message_guid, source_path}`
+   - HEIC/HEIF photos are converted to JPEG with macOS `sips` (`converted_from` names the original type)
+   - `status`: `ok`, `no_attachment` (message has none), `not_downloaded` (not on this Mac, e.g. offloaded to iCloud: open the chat in Messages, then retry), `missing` (recorded as downloaded but the file is gone), `unreadable` (no permission, usually Full Disk Access) or `not_found` (no such attachment/message)
+   - Attachment files live under `~/Library/Messages/Attachments`, so reading them needs Full Disk Access even when `IMESSAGE_DB_PATH` points at a snapshot
+
+8. **refresh_database** - Make later reads see the latest messages (no parameters)
    - Live mode: closes and reopens the connection
    - Snapshot mode: builds a fresh snapshot, keeping the previous one if that fails
    - Returns `{status: "ok", mode, source_path, path, opened_at, snapshot?}`, or `{status: "db_unavailable" | "snapshot_failed", message, still_serving}`
+
+### Message attachments
+
+Every message in `search_messages`, `get_recent_messages` and
+`get_messages_from_chat` results has an `attachments` array (empty when there
+are none) of `{attachment_id, filename, mime_type, byte_size}`. Pass
+`attachment_id` to `get_attachment` to fetch the file.
 
 ### Message text
 
@@ -272,13 +290,13 @@ absolute `IMESSAGE_DB_PATH`.
 
 ### Permissions
 
-| Flag                         | Needed for                                                                                                                                                                 |
-| ---------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `--allow-read`               | The Messages and Contacts databases                                                                                                                                        |
-| `--allow-env`, `--allow-sys` | Configuration and the home directory                                                                                                                                       |
-| `--allow-ffi`                | SQLite native bindings                                                                                                                                                     |
-| `--allow-write`              | Snapshot mode (writes under `IMESSAGE_SNAPSHOT_DIR`)                                                                                                                       |
-| `--allow-run`                | Snapshot mode: checking whether other instances are still running, so their files are not removed (without it nothing is cleaned up), and `getconf` when `TMPDIR` is unset |
+| Flag                         | Needed for                                                                                                                                                                                                            |
+| ---------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `--allow-read`               | The Messages and Contacts databases                                                                                                                                                                                   |
+| `--allow-env`, `--allow-sys` | Configuration and the home directory                                                                                                                                                                                  |
+| `--allow-ffi`                | SQLite native bindings                                                                                                                                                                                                |
+| `--allow-write`              | Snapshot mode (writes under `IMESSAGE_SNAPSHOT_DIR`) and `get_attachment` (copies to `$TMPDIR/imessage-mcp/media`)                                                                                                    |
+| `--allow-run`                | `sips` for HEIC to JPEG in `get_attachment`; in snapshot mode, checking whether other instances are still running so their files are not removed (without it nothing is cleaned up); `getconf` when `TMPDIR` is unset |
 
 ### When a database cannot be opened
 

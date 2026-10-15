@@ -5,6 +5,7 @@
     "jsr:@denosaurs/plug@1": "1.1.0",
     "jsr:@std/assert@1": "1.0.19",
     "jsr:@std/encoding@1": "1.0.10",
+    "jsr:@std/encoding@^1.0.10": "1.0.10",
     "jsr:@std/fmt@1": "1.0.8",
     "jsr:@std/fs@1": "1.0.21",
     "jsr:@std/internal@^1.0.12": "1.0.12",
@@ -26,7 +27,7 @@
     "@denosaurs/plug@1.1.0": {
       "integrity": "eb2f0b7546c7bca2000d8b0282c54d50d91cf6d75cb26a80df25a6de8c4bc044",
       "dependencies": [
-        "jsr:@std/encoding",
+        "jsr:@std/encoding@1",
         "jsr:@std/fmt",
         "jsr:@std/fs",
         "jsr:@std/path@1"
@@ -599,6 +600,7 @@
       "packages/imessage-mcp": {
         "dependencies": [
           "jsr:@db/sqlite@0.13.0",
+          "jsr:@std/encoding@^1.0.10",
           "npm:@modelcontextprotocol/sdk@^1.27.1",
           "npm:zod@^4.3.6"
         ]

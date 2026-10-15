@@ -10,13 +10,14 @@ deno add @wyattjoh/imessage-mcp
 
 ## Features
 
-- **7 MCP Tools** for comprehensive iMessage access:
+- **8 MCP Tools** for comprehensive iMessage access:
   - `search_messages` - Full-text search with filters
   - `get_recent_messages` - Latest messages across all chats
   - `get_chats` - List conversations by activity
   - `get_handles` - All contacts/phone numbers
   - `get_messages_from_chat` - Messages from specific conversations
   - `search_contacts` - Search macOS Contacts by name
+  - `get_attachment` - Retrieve an attached file (photos, PDFs, ...); HEIC is converted to JPEG
   - `refresh_database` - Reopen the database, or rebuild the snapshot in snapshot mode
 
 - **Pagination Support** - All tools support limit/offset pagination
@@ -74,8 +75,8 @@ The server requires the following Deno permissions:
 - `--allow-env`: Environment variable access
 - `--allow-sys`: System information access
 - `--allow-ffi`: SQLite native bindings
-- `--allow-write`: Snapshot mode (writes under `IMESSAGE_SNAPSHOT_DIR`)
-- `--allow-run`: Snapshot mode (detecting dead instances' snapshot files; `getconf` when `TMPDIR` is unset)
+- `--allow-write`: Snapshot mode (writes under `IMESSAGE_SNAPSHOT_DIR`) and `get_attachment` (copies under `$TMPDIR/imessage-mcp/media`)
+- `--allow-run`: `sips` for HEIC to JPEG conversion; snapshot mode (detecting dead instances' snapshot files; `getconf` when `TMPDIR` is unset)
 
 ## Configuration
 

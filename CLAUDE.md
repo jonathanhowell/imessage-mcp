@@ -107,7 +107,8 @@ This monorepo contains a Model Context Protocol (MCP) server and core library th
 4. `get_handles` - All contacts/phone numbers
 5. `get_messages_from_chat` - Messages from specific chat GUID
 6. `search_contacts` - Search macOS Contacts by name, returns phone/email handles
-7. `refresh_database` - Reopen the connection (live) or rebuild the snapshot (snapshot mode)
+7. `get_attachment` - Copy an attachment to `$TMPDIR/imessage-mcp/media` (or inline it); HEIC -> JPEG via `sips`
+8. `refresh_database` - Reopen the connection (live) or rebuild the snapshot (snapshot mode)
 
 ### Important Pagination Note
 

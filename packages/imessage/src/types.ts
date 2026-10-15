@@ -60,6 +60,38 @@ export interface MessageWithHandle extends Message {
   handle_id_string: string;
   handle_country: string | undefined;
   handle_service: string;
+  /** Files attached to the message (empty when there are none). */
+  attachments?: AttachmentSummary[];
+}
+
+/**
+ * A row of the `attachment` table.
+ */
+export interface Attachment {
+  /** `attachment.ROWID`; pass to `get_attachment`. */
+  attachment_id: number;
+  guid: string;
+  /** Path on disk as Messages stores it (may start with `~`), or null when not downloaded. */
+  filename: string | undefined;
+  /** Original file name. */
+  transfer_name: string | undefined;
+  mime_type: string | undefined;
+  uti: string | undefined;
+  total_bytes: number;
+  /** 5 once downloaded; 0 when not on this Mac (e.g. offloaded to iCloud). */
+  transfer_state: number;
+}
+
+/**
+ * What a message result says about each of its attachments.
+ */
+export interface AttachmentSummary {
+  attachment_id: number;
+  /** Original file name, or the stored file's name. */
+  filename: string | undefined;
+  mime_type: string | undefined;
+  /** Size recorded by Messages. */
+  byte_size: number;
 }
 
 /**

@@ -5,12 +5,15 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import process from "node:process";
 import { z } from "zod";
 import {
+  getAttachmentById,
   getChats,
   getHandles,
+  getMessageAttachments,
   getMessagesFromChat,
   getRecentMessages,
   searchContactsByName,
   searchMessages,
+  toAttachmentSummary,
 } from "@wyattjoh/imessage";
 import deno from "../deno.json" with { type: "json" };
 import {
@@ -20,6 +23,7 @@ import {
   isUnavailableError,
   type MessagesState,
 } from "./state.ts";
+import { exportAttachment } from "./attachment_export.ts";
 
 const SearchMessagesSchema = z.object({
   query: z
@@ -149,7 +153,10 @@ const SearchContactsSchema = z.object({
 });
 
 type ToolResult = {
-  content: { type: "text"; text: string }[];
+  content: (
+    | { type: "text"; text: string }
+    | { type: "image"; data: string; mimeType: string }
+  )[];
   isError?: boolean;
 };
 
@@ -167,9 +174,19 @@ const handler = <A>(
   label: string,
   fn: (args: A) => unknown,
 ) =>
+  rawHandler(
+    label,
+    async (args: A) => textResult(JSON.stringify(await fn(args), null, 2)),
+  );
+
+/** Like {@link handler}, for a body that builds its own result content. */
+const rawHandler = <A>(
+  label: string,
+  fn: (args: A) => Promise<ToolResult>,
+) =>
 async (args: A): Promise<ToolResult> => {
   try {
-    return textResult(JSON.stringify(await fn(args), null, 2));
+    return await fn(args);
   } catch (error) {
     if (isUnavailableError(error)) {
       return textResult(JSON.stringify(error.unavailable, null, 2), true);
@@ -185,7 +202,29 @@ export interface ServerState {
   contacts: ContactsState;
 }
 
-export const createServer = ({ messages, contacts }: ServerState) => {
+export const GetAttachmentSchema = z.object({
+  attachment_id: z
+    .number()
+    .int()
+    .optional()
+    .describe(
+      "Attachment ID from a message's 'attachments' list (in search_messages, get_recent_messages or get_messages_from_chat results)",
+    ),
+  message_guid: z
+    .string()
+    .optional()
+    .describe(
+      "Message GUID; returns the message's first attachment and lists all of them in 'attachments'. Use attachment_id to fetch the others.",
+    ),
+  inline: z
+    .boolean()
+    .default(false)
+    .describe(
+      "Return the content inline (files up to 5 MB): images as an image content block, other files base64-encoded in 'data'. Default false: the file is copied to a temp path returned in 'path'.",
+    ),
+});
+
+const createServer = ({ messages, contacts }: ServerState) => {
   const server = new McpServer({
     name: "imessage",
     version: deno.version,
@@ -256,6 +295,68 @@ export const createServer = ({ messages, contacts }: ServerState) => {
           args.offset,
         ),
     ),
+  );
+
+  server.tool(
+    "get_attachment",
+    "Retrieve a file attached to an iMessage: photos (HEIC is converted to JPEG so it can be viewed), PDFs, videos, voice notes, contact cards and other files. Identify it by attachment_id (from a message's 'attachments' list) or message_guid. By default the file is copied to a temp path and the response is {status, path, mime_type, byte_size, filename}; read the file at 'path'. Pass inline: true to get the content in the response instead (files up to 5 MB). 'status' is always set: 'ok', 'no_attachment' (the message has none), 'not_downloaded' (not on this Mac, e.g. offloaded to iCloud: open the chat in Messages, then retry), 'missing' (recorded as downloaded but the file is gone), 'unreadable' (no permission, usually Full Disk Access) or 'not_found' (no such attachment or message).",
+    GetAttachmentSchema.shape,
+    rawHandler("Error getting attachment", async (args) => {
+      const json = (value: unknown) =>
+        textResult(JSON.stringify(value, null, 2));
+      if ((args.attachment_id === undefined) === !args.message_guid) {
+        return textResult(
+          "Error getting attachment: pass exactly one of attachment_id or message_guid",
+          true,
+        );
+      }
+      const db = await messages.acquire();
+      let row;
+      let siblings: unknown[] | undefined;
+      if (args.attachment_id !== undefined) {
+        row = getAttachmentById(db, args.attachment_id);
+        if (!row) {
+          return json({
+            status: "not_found",
+            attachment_id: args.attachment_id,
+            note: "No attachment with this ID.",
+          });
+        }
+      } else {
+        const list = getMessageAttachments(db, args.message_guid!);
+        if (!list) {
+          return json({
+            status: "not_found",
+            message_guid: args.message_guid,
+            note: "No message with this GUID.",
+          });
+        }
+        if (list.length === 0) {
+          return json({
+            status: "no_attachment",
+            message_guid: args.message_guid,
+            note: "This message has no attachments.",
+          });
+        }
+        row = { ...list[0]!, message_guid: args.message_guid };
+        siblings = list.map(toAttachmentSummary);
+      }
+
+      const { data, ...result } = await exportAttachment(row, {
+        inline: args.inline,
+      });
+      const payload = siblings ? { ...result, attachments: siblings } : result;
+      if (data === undefined) return json(payload);
+      if (String(result.mime_type).startsWith("image/")) {
+        return {
+          content: [
+            { type: "text", text: JSON.stringify(payload, null, 2) },
+            { type: "image", data, mimeType: String(result.mime_type) },
+          ],
+        };
+      }
+      return json({ ...payload, data });
+    }),
   );
 
   server.tool(
