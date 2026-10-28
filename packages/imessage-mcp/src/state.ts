@@ -109,8 +109,9 @@ export interface DatabaseInfo {
   mode: DbMode;
   /** The configured database (chat.db or IMESSAGE_DB_PATH). */
   source_path: string;
-  /** The file actually open: source_path in live mode, else the snapshot. */
+  /** The file read: source_path in live mode, else the snapshot. */
   path: string;
+  /** Live: when the database was last opened successfully. */
   opened_at: string;
   snapshot?: {
     created_at: string;
@@ -120,16 +121,34 @@ export interface DatabaseInfo {
   };
 }
 
-/** Lazily opened read-only handle on the Messages database. */
+/**
+ * Read-only access to the Messages database.
+ *
+ * Live mode opens a connection for each call and closes it afterwards. A
+ * connection that stays attached stops SQLite from deleting or resetting the
+ * WAL when another process (such as a job that refreshes a snapshot in place
+ * with sqlite3_backup) closes the file, so every copy would be appended to
+ * the -wal file and it would grow without limit. Opening read-only does not
+ * prevent that, and `immutable=1` would read a file rewritten in place as
+ * corrupt.
+ *
+ * Snapshot mode keeps one connection on its own private copy, which nothing
+ * else writes.
+ */
 export interface MessagesState {
   readonly config: MessagesConfig;
-  /** Begins opening (or snapshotting) in the background; idempotent. */
+  /** Live: checks the database opens. Snapshot: builds the first copy. */
   start(): Promise<void>;
-  /** Returns the open handle, or throws an {@link UnavailableError}. */
+  /**
+   * Runs `fn` with an open connection, or throws an {@link UnavailableError}.
+   * `fn` is synchronous so the connection is never held across an await.
+   */
+  withDatabase<T>(fn: (db: Database) => T): Promise<T>;
+  /** Snapshot mode only: the long-lived handle on the snapshot. */
   acquire(): Promise<Database>;
   /**
-   * Live: closes and reopens the connection. Snapshot: builds a fresh copy,
-   * keeping the previous one if that fails.
+   * Live: checks the database opens (every call opens it afresh anyway).
+   * Snapshot: builds a fresh copy, keeping the previous one if that fails.
    */
   refresh(): Promise<DatabaseInfo>;
   info(): DatabaseInfo | null;
@@ -153,21 +172,35 @@ export const createMessagesState = (
     previous?.db.close();
   };
 
-  const openLive = () => {
+  let liveInfo: DatabaseInfo | null = null;
+
+  /** Live mode: opens a fresh connection, or throws db_unavailable. */
+  const openLive = (): Database => {
     try {
-      swap(openMessagesDatabase(path), {
+      const db = openMessagesDatabase(path);
+      liveInfo = {
         mode,
         source_path: path,
         path,
         opened_at: new Date().toISOString(),
-      });
+      };
       lastError = null;
+      return db;
     } catch (error) {
       lastError = {
         status: "db_unavailable",
         message: explainOpenError(error, path),
         path,
       };
+      throw createUnavailableError(lastError);
+    }
+  };
+
+  const probeLive = () => {
+    try {
+      openLive().close();
+    } catch {
+      // recorded in lastError
     }
   };
 
@@ -214,7 +247,7 @@ export const createMessagesState = (
     if (!inflight) {
       startedAt = new Date().toISOString();
       inflight =
-        (mode === "live" ? Promise.resolve(openLive()) : buildSnapshot())
+        (mode === "live" ? Promise.resolve(probeLive()) : buildSnapshot())
           .finally(() => {
             inflight = null;
           });
@@ -236,25 +269,40 @@ export const createMessagesState = (
         : lastError!,
     );
 
+  const acquire = async (): Promise<Database> => {
+    if (mode === "live") {
+      throw new Error("acquire() is for snapshot mode; use withDatabase()");
+    }
+    if (current) return current.db;
+    // Nothing usable yet (or the last attempt failed): try now.
+    const pending = start();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    await Promise.race([
+      pending,
+      new Promise((resolve) => {
+        timer = setTimeout(resolve, config.acquireWaitMs);
+      }),
+    ]);
+    clearTimeout(timer);
+    // `current` is reassigned by the load that was awaited above.
+    const opened = current as { db: Database } | null;
+    if (opened) return opened.db;
+    throw unavailable();
+  };
+
   return {
     config,
     start,
-    async acquire() {
-      if (current) return current.db;
-      // Nothing usable yet (or the last attempt failed): try now.
-      const pending = start();
-      let timer: ReturnType<typeof setTimeout> | undefined;
-      await Promise.race([
-        pending,
-        new Promise((resolve) => {
-          timer = setTimeout(resolve, config.acquireWaitMs);
-        }),
-      ]);
-      clearTimeout(timer);
-      // `current` is reassigned by the load that was awaited above.
-      const opened = current as { db: Database } | null;
-      if (opened) return opened.db;
-      throw unavailable();
+    acquire,
+    async withDatabase(fn) {
+      if (mode === "snapshot") return fn(await acquire());
+      const db = openLive();
+      try {
+        return fn(db);
+      } finally {
+        // Finalizes every statement prepared on it, ending any read.
+        db.close();
+      }
     },
     async refresh() {
       if (inflight) await inflight;
@@ -266,9 +314,9 @@ export const createMessagesState = (
           still_serving: current?.info ?? null,
         });
       }
-      return current!.info;
+      return mode === "live" ? liveInfo! : current!.info;
     },
-    info: () => current?.info ?? null,
+    info: () => mode === "live" ? liveInfo : current?.info ?? null,
     close() {
       current?.db.close();
       current = null;

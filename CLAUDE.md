@@ -64,7 +64,9 @@ This monorepo contains a Model Context Protocol (MCP) server and core library th
    - Creates MCP server instance using `@modelcontextprotocol/sdk`
    - Defines the tools with Zod schemas for validation
    - Uses StdioServerTransport for communication; connects BEFORE touching any database
-   - `src/state.ts`: lazily opened Messages/Contacts handles; open failures become structured
+   - `src/state.ts`: live mode opens the Messages DB per tool call via `withDatabase` and closes it in
+     `finally` (never hold it open: an attached reader makes an in-place-refreshed WAL snapshot's
+     -wal file grow without limit); contacts handles are lazy; open failures become structured
      `{status, message, path}` tool errors (`db_unavailable`, `contacts_unavailable`,
      `snapshot_pending`, `snapshot_failed`), never a crash
    - `src/snapshot.ts` + `src/snapshot_worker.ts`: snapshot mode (`IMESSAGE_DB_MODE=snapshot`),
@@ -108,7 +110,7 @@ This monorepo contains a Model Context Protocol (MCP) server and core library th
 5. `get_messages_from_chat` - Messages from specific chat GUID
 6. `search_contacts` - Search macOS Contacts by name, returns phone/email handles
 7. `get_attachment` - Copy an attachment to `$TMPDIR/imessage-mcp/media` (or inline it); HEIC -> JPEG via `sips`
-8. `refresh_database` - Reopen the connection (live) or rebuild the snapshot (snapshot mode)
+8. `refresh_database` - Check the DB opens (live: every call opens/closes it) or rebuild the snapshot (snapshot mode)
 
 ### Important Pagination Note
 

@@ -236,15 +236,17 @@ const createServer = ({ messages, contacts }: ServerState) => {
     SearchMessagesSchema.shape,
     handler(
       "Error searching messages",
-      async (args) =>
-        searchMessages(await messages.acquire(), {
-          query: args.query,
-          handle: args.handle,
-          startDate: args.startDate ? new Date(args.startDate) : undefined,
-          endDate: args.endDate ? new Date(args.endDate) : undefined,
-          limit: args.limit,
-          offset: args.offset,
-        }),
+      (args) =>
+        messages.withDatabase((db) =>
+          searchMessages(db, {
+            query: args.query,
+            handle: args.handle,
+            startDate: args.startDate ? new Date(args.startDate) : undefined,
+            endDate: args.endDate ? new Date(args.endDate) : undefined,
+            limit: args.limit,
+            offset: args.offset,
+          })
+        ),
     ),
   );
 
@@ -254,8 +256,10 @@ const createServer = ({ messages, contacts }: ServerState) => {
     GetRecentMessagesSchema.shape,
     handler(
       "Error getting recent messages",
-      async (args) =>
-        getRecentMessages(await messages.acquire(), args.limit, args.offset),
+      (args) =>
+        messages.withDatabase((db) =>
+          getRecentMessages(db, args.limit, args.offset)
+        ),
     ),
   );
 
@@ -265,8 +269,8 @@ const createServer = ({ messages, contacts }: ServerState) => {
     GetChatsSchema.shape,
     handler(
       "Error getting chats",
-      async (args) =>
-        getChats(await messages.acquire(), args.limit, args.offset),
+      (args) =>
+        messages.withDatabase((db) => getChats(db, args.limit, args.offset)),
     ),
   );
 
@@ -276,8 +280,8 @@ const createServer = ({ messages, contacts }: ServerState) => {
     GetHandlesSchema.shape,
     handler(
       "Error getting handles",
-      async (args) =>
-        getHandles(await messages.acquire(), args.limit, args.offset),
+      (args) =>
+        messages.withDatabase((db) => getHandles(db, args.limit, args.offset)),
     ),
   );
 
@@ -287,12 +291,9 @@ const createServer = ({ messages, contacts }: ServerState) => {
     GetMessagesFromChatSchema.shape,
     handler(
       "Error getting messages from chat",
-      async (args) =>
-        getMessagesFromChat(
-          await messages.acquire(),
-          args.chatGuid,
-          args.limit,
-          args.offset,
+      (args) =>
+        messages.withDatabase((db) =>
+          getMessagesFromChat(db, args.chatGuid, args.limit, args.offset)
         ),
     ),
   );
@@ -310,37 +311,45 @@ const createServer = ({ messages, contacts }: ServerState) => {
           true,
         );
       }
-      const db = await messages.acquire();
-      let row;
-      let siblings: unknown[] | undefined;
-      if (args.attachment_id !== undefined) {
-        row = getAttachmentById(db, args.attachment_id);
-        if (!row) {
-          return json({
-            status: "not_found",
-            attachment_id: args.attachment_id,
-            note: "No attachment with this ID.",
-          });
+      // Look the rows up with the database open, then close it before the
+      // (possibly slow) file copy and HEIC conversion.
+      const found = await messages.withDatabase((db) => {
+        if (args.attachment_id !== undefined) {
+          const row = getAttachmentById(db, args.attachment_id);
+          return row ? { row } : {
+            early: {
+              status: "not_found",
+              attachment_id: args.attachment_id,
+              note: "No attachment with this ID.",
+            },
+          };
         }
-      } else {
         const list = getMessageAttachments(db, args.message_guid!);
         if (!list) {
-          return json({
-            status: "not_found",
-            message_guid: args.message_guid,
-            note: "No message with this GUID.",
-          });
+          return {
+            early: {
+              status: "not_found",
+              message_guid: args.message_guid,
+              note: "No message with this GUID.",
+            },
+          };
         }
         if (list.length === 0) {
-          return json({
-            status: "no_attachment",
-            message_guid: args.message_guid,
-            note: "This message has no attachments.",
-          });
+          return {
+            early: {
+              status: "no_attachment",
+              message_guid: args.message_guid,
+              note: "This message has no attachments.",
+            },
+          };
         }
-        row = { ...list[0]!, message_guid: args.message_guid };
-        siblings = list.map(toAttachmentSummary);
-      }
+        return {
+          row: { ...list[0]!, message_guid: args.message_guid },
+          siblings: list.map(toAttachmentSummary),
+        };
+      });
+      if (!found.row) return json(found.early);
+      const { row, siblings } = found;
 
       const { data, ...result } = await exportAttachment(row, {
         inline: args.inline,
@@ -361,7 +370,7 @@ const createServer = ({ messages, contacts }: ServerState) => {
 
   server.tool(
     "refresh_database",
-    "Make subsequent reads see the latest iMessage data. In live mode (default) this closes and reopens the database connection, which also picks up a replaced IMESSAGE_DB_PATH file and retries after db_unavailable. In snapshot mode (IMESSAGE_DB_MODE=snapshot) it builds a fresh snapshot; if that fails the previous snapshot stays in use. Returns {status: 'ok', mode, source_path, path, opened_at, snapshot?}, or {status: 'db_unavailable' | 'snapshot_failed', message, still_serving}.",
+    "Make subsequent reads see the latest iMessage data. In live mode (default) every tool call already opens the database afresh and closes it afterwards, so this only checks that the database can be opened (useful after db_unavailable, e.g. once Full Disk Access is granted). In snapshot mode (IMESSAGE_DB_MODE=snapshot) it builds a fresh snapshot; if that fails the previous snapshot stays in use. Returns {status: 'ok', mode, source_path, path, opened_at, snapshot?}, or {status: 'db_unavailable' | 'snapshot_failed', message, still_serving}.",
     {},
     handler("Error refreshing database", async () => ({
       status: "ok",

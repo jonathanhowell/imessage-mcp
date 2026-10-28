@@ -18,7 +18,7 @@ deno add @wyattjoh/imessage-mcp
   - `get_messages_from_chat` - Messages from specific conversations
   - `search_contacts` - Search macOS Contacts by name
   - `get_attachment` - Retrieve an attached file (photos, PDFs, ...); HEIC is converted to JPEG
-  - `refresh_database` - Reopen the database, or rebuild the snapshot in snapshot mode
+  - `refresh_database` - Check the database opens, or rebuild the snapshot in snapshot mode
 
 - **Pagination Support** - All tools support limit/offset pagination
 - **Type-Safe** - Full TypeScript support with Zod schemas

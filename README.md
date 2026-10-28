@@ -172,7 +172,7 @@ database. If it cannot be read they return a structured
    - Attachment files live under `~/Library/Messages/Attachments`, so reading them needs Full Disk Access even when `IMESSAGE_DB_PATH` points at a snapshot
 
 8. **refresh_database** - Make later reads see the latest messages (no parameters)
-   - Live mode: closes and reopens the connection
+   - Live mode: checks that the database opens (every call opens it afresh anyway)
    - Snapshot mode: builds a fresh snapshot, keeping the previous one if that fails
    - Returns `{status: "ok", mode, source_path, path, opened_at, snapshot?}`, or `{status: "db_unavailable" | "snapshot_failed", message, still_serving}`
 
@@ -274,9 +274,18 @@ expanded). The resolved path is logged at startup and included in
 
 In **live** mode (the default) the server reads `chat.db` directly. SQLite
 readers see new messages, including ones still in `chat.db-wal`, on every
-query, so live reads are always current. `refresh_database` closes and reopens
-the connection. Use it after replacing the file at `IMESSAGE_DB_PATH`, or to
-retry after `db_unavailable` (for example, once Full Disk Access is granted).
+query, so live reads are always current.
+
+Each tool call opens the database and closes it when the call finishes; no
+connection is held between calls. This matters when `IMESSAGE_DB_PATH` points
+at a snapshot that another job refreshes in place (for example with
+`sqlite3_backup`): while any connection stays attached, SQLite cannot delete or
+reset that file's WAL when the job closes it, so each copy is appended to the
+`-wal` file and it grows without limit. (Opening read-only does not prevent
+this, and `immutable=1` would read a file rewritten in place as corrupt.)
+`refresh_database` in live mode just checks that the database opens, which is
+useful to retry after `db_unavailable` (for example, once Full Disk Access is
+granted).
 
 In **snapshot** mode (`IMESSAGE_DB_MODE=snapshot`) the server copies the
 database after the MCP handshake and serves every read from that copy until
